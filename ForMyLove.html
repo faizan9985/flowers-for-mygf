@@ -9,16 +9,18 @@
 
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html, body { width:100%; height:100%; overflow:hidden; touch-action:manipulation; }
-body { background:#06000e; }
+body { background:#020818; }
 
 canvas#stars { position:fixed; inset:0; z-index:0; pointer-events:none; }
 
 .bg-glow {
   position:fixed; inset:0; z-index:0;
   background:
-    radial-gradient(ellipse 90% 60% at 50% 115%, #3d0020 0%, transparent 60%),
-    radial-gradient(ellipse 130% 80% at 50% 110%, #1c0012 0%, transparent 78%),
-    #06000e;
+    radial-gradient(ellipse 100% 55% at 50% 0%,   #0a1a4a 0%, transparent 65%),
+    radial-gradient(ellipse 80%  45% at 20% 30%,  #0d2260 0%, transparent 55%),
+    radial-gradient(ellipse 80%  45% at 80% 20%,  #0a1850 0%, transparent 55%),
+    radial-gradient(ellipse 90%  60% at 50% 115%, #1a0a3a 0%, transparent 60%),
+    linear-gradient(to bottom, #020c2e 0%, #06122a 35%, #0a0f22 65%, #080818 100%);
 }
 
 /* Shooting star */
@@ -41,7 +43,6 @@ canvas#stars { position:fixed; inset:0; z-index:0; pointer-events:none; }
   position:fixed; bottom:0; left:50%;
   transform:translateX(-50%);
   z-index:2; overflow:visible;
-  /* Responsive sizing */
   width:min(820px, 100vw);
   height:auto;
 }
@@ -144,7 +145,12 @@ canvas#stars { position:fixed; inset:0; z-index:0; pointer-events:none; }
   border-radius:40px;
   padding:clamp(7px,2vw,11px) clamp(14px,4vw,26px);
   pointer-events:none;
-  white-space:nowrap;
+  /* Allow wrapping on small screens instead of overflowing */
+  white-space:normal;
+  word-break:break-word;
+  /* Cap width so it never exceeds the viewport */
+  max-width:min(280px, 88vw);
+  width:max-content;
   backdrop-filter:blur(10px);
   -webkit-backdrop-filter:blur(10px);
   box-shadow:
@@ -152,8 +158,9 @@ canvas#stars { position:fixed; inset:0; z-index:0; pointer-events:none; }
     0 0 60px rgba(220,30,70,0.12),
     inset 0 0 14px rgba(255,60,100,0.08);
   opacity:0;
-  max-width:90vw;
   text-shadow:0 0 18px rgba(255,160,190,0.5);
+  /* Ensure it can't escape the screen */
+  overflow:visible;
 }
 
 /* tiny heart icon before message */
@@ -206,8 +213,8 @@ canvas#stars { position:fixed; inset:0; z-index:0; pointer-events:none; }
   opacity:0.18;
   animation:corner-pulse 4s ease-in-out infinite alternate;
 }
-.corner-glow.tl { top:-80px; left:-80px; width:220px; height:220px; background:#9b0040; }
-.corner-glow.br { bottom:-80px; right:-80px; width:280px; height:280px; background:#6b0030; }
+.corner-glow.tl { top:-80px; left:-80px; width:220px; height:220px; background:#0a2a6e; }
+.corner-glow.br { bottom:-80px; right:-80px; width:280px; height:280px; background:#06184a; }
 @keyframes corner-pulse {
   from{ opacity:0.13; } to{ opacity:0.24; }
 }
@@ -237,7 +244,6 @@ canvas#stars { position:fixed; inset:0; z-index:0; pointer-events:none; }
   <stop offset="50%" stop-color="#e070a0"/>
   <stop offset="100%" stop-color="#c03878"/>
 </radialGradient>
-<!-- Warm rose gradient for variety -->
 <radialGradient id="pg4" cx="50%" cy="50%" r="65%">
   <stop offset="0%" stop-color="#fcd0e0"/>
   <stop offset="45%" stop-color="#f06090"/>
@@ -490,21 +496,27 @@ const messages=[
   {text:"Until we meet again", icon:"💌"},
 ];
 
-/* Responsive positions: [left%, top%] — kept in safe zone away from flowers */
+/*
+  Desired positions as fractions of viewport [leftFrac, topFrac].
+  These are the "anchor" point — we then clamp the element so it
+  stays fully inside the safe area (8px margin on all sides).
+*/
 const positions=[
-  {l:'3%',  t:'8%'},
-  {l:'68%', t:'7%'},
-  {l:'2%',  t:'35%'},
-  {l:'70%', t:'38%'},
-  {l:'3%',  t:'62%'},
-  {l:'66%', t:'62%'},
-  {l:'30%', t:'5%'},
-  {l:'55%', t:'20%'},
-  {l:'15%', t:'20%'},
-  {l:'40%', t:'72%'},
-  {l:'18%', t:'70%'},
-  {l:'58%', t:'72%'},
+  [0.03, 0.08],
+  [0.68, 0.07],
+  [0.02, 0.35],
+  [0.70, 0.38],
+  [0.03, 0.62],
+  [0.66, 0.62],
+  [0.30, 0.05],
+  [0.55, 0.20],
+  [0.15, 0.20],
+  [0.40, 0.72],
+  [0.18, 0.70],
+  [0.58, 0.72],
 ];
+
+const MARGIN = 8; // px gap from screen edges
 
 const msgCont=document.getElementById('msgs');
 const msgEls=messages.map((m,i)=>{
@@ -512,26 +524,60 @@ const msgEls=messages.map((m,i)=>{
   el.className='msg';
   el.setAttribute('data-icon', m.icon);
   el.textContent=m.text;
-  const p=positions[i]||{l:'10%',t:'10%'};
-  el.style.left=p.l; el.style.top=p.t;
+  // Start offscreen so it doesn't flash before positioning
+  el.style.left='-9999px'; el.style.top='-9999px';
   msgCont.appendChild(el);
   return el;
 });
+
+/* Clamp a message element so it stays fully within the viewport */
+function clampMsg(el, leftFrac, topFrac, jitterLpx, jitterTpx) {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+
+  // Desired pixel position (top-left corner of element)
+  let x = leftFrac * vw + jitterLpx;
+  let y = topFrac * vh + jitterTpx;
+
+  // Clamp so the element never leaves the safe area
+  x = Math.max(MARGIN, Math.min(x, vw - w - MARGIN));
+  y = Math.max(MARGIN, Math.min(y, vh - h - MARGIN));
+
+  el.style.left = x + 'px';
+  el.style.top  = y + 'px';
+}
 
 let q=[...Array(messages.length).keys()];
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
 
 function showMsg(){
   if(!q.length) q=shuffle([...Array(messages.length).keys()]);
-  const idx=q.shift(), m=msgEls[idx], p=positions[idx]||{l:'10%',t:'10%'};
-  // clamp to viewport on mobile
-  const jitterL=((Math.random()-.5)*3).toFixed(1);
-  const jitterT=((Math.random()-.5)*2.5).toFixed(1);
-  m.style.left=`calc(${p.l} + ${jitterL}%)`;
-  m.style.top=`calc(${p.t} + ${jitterT}%)`;
-  m.classList.remove('visible'); void m.offsetWidth; m.classList.add('visible');
-  setTimeout(()=>{ m.classList.remove('visible'); setTimeout(showMsg, 400+Math.random()*600); }, 5000);
+  const idx=q.shift();
+  const m=msgEls[idx];
+  const [lf, tf]=positions[idx]||[0.1, 0.1];
+
+  const jL=(Math.random()-.5)*0.03*window.innerWidth;
+  const jT=(Math.random()-.5)*0.025*window.innerHeight;
+
+  // Place element off-screen first so we can measure its size,
+  // then clamp and show it.
+  m.style.left='-9999px'; m.style.top='-9999px';
+  m.classList.remove('visible');
+
+  // Use rAF to let the browser measure after any style recalc
+  requestAnimationFrame(()=>{
+    clampMsg(m, lf, tf, jL, jT);
+    void m.offsetWidth; // force reflow to restart animation
+    m.classList.add('visible');
+    setTimeout(()=>{
+      m.classList.remove('visible');
+      setTimeout(showMsg, 400+Math.random()*600);
+    }, 5000);
+  });
 }
+
 // Stagger first batch
 setTimeout(()=>{ showMsg(); setTimeout(showMsg,1600); setTimeout(showMsg,2900); setTimeout(showMsg,4100); }, 3600);
 
@@ -548,7 +594,6 @@ function spawnHearts(x,y){
     document.body.appendChild(h);
     setTimeout(()=>h.remove(),1500);
   }
-  // ripple
   const rip=document.createElement('div');
   rip.className='ripple';
   rip.style.cssText=`left:${x-5}px;top:${y-5}px;`;
